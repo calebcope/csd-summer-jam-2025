@@ -6,7 +6,6 @@ using Random = UnityEngine.Random;
 
 public static class ProceduralGenerationAlgorithms
 {
-
     public static HashSet<Vector2Int> SimpleRandomWalk(Vector2Int startPosition, int walkLength)
     {
         HashSet<Vector2Int> path = new HashSet<Vector2Int>();
@@ -59,7 +58,7 @@ public static class ProceduralGenerationAlgorithms
                     {
                         SplitVertically(minWidth, roomsQueue, room);
                     }
-                    else if (room.size.x >= minWidth &&  room.size.y >= minHeight)
+                    else if (room.size.x >= minWidth && room.size.y >= minHeight)
                     {
                         roomsList.Add(room);
                     }
@@ -96,7 +95,7 @@ public static class ProceduralGenerationAlgorithms
 
     private static void SplitHorizontally(int minHeight, Queue<BoundsInt> roomsQueue, BoundsInt room)
     {
-        var ySplit = Random.Range(minHeight/3, room.size.x-minHeight/3);
+        var ySplit = Random.Range(minHeight/3, room.size.y-minHeight/3);
         BoundsInt room1 = new BoundsInt(room.min, new Vector3Int(room.size.x, ySplit, room.size.z));
         BoundsInt room2 = new BoundsInt(new Vector3Int(room.min.x, room.min.y + ySplit, room.min.z),
             new Vector3Int(room.size.x, room.size.y -  ySplit, room.size.z));

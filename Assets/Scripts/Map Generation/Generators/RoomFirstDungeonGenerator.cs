@@ -6,20 +6,37 @@ using Random = UnityEngine.Random;
 
 public class RoomFirstDungeonGenerator : SimpleRandomWalkDungeonGenerator
 {
+    [Header("Spawn Prefabs")]
+    [SerializeField] private GameObject playerPrefab;
+    [SerializeField] private GameObject[] decorationPrefabs;
+    [SerializeField] private GameObject enemyPrefab;
+    [SerializeField] private GameObject magePrefab;
+    [SerializeField] private GameObject torchPrefab;
+    [SerializeField] private GameObject chestPrefab;
+
+    [Header("Density Settings")]
+    [Range(0f, 1f)][SerializeField] private float decorationDensity = 0.05f;
+    [Range(0f, 1f)][SerializeField] private float enemyDensity = 0.10f;
+    [SerializeField] private int minTorchesPerRoom = 3;
+    [SerializeField] private int maxTorchesPerRoom = 8;
+
+    [Header("Dungeon Settings")]
+    [SerializeField] private int minRoomCount = 8;
+    [SerializeField] private int minRoomWidth = 5, minRoomHeight = 5;
+    [SerializeField] private int dungeonWidth = 50, dungeonHeight = 50;
     [SerializeField]
-    private int minRoomCount = 8;
+    [Range(0,10)] private int offset = 1;
     [SerializeField]
-    private int minRoomWidth = 5, minRoomHeight = 5;
-    [SerializeField]
-    private int dungeonWidth = 50, dungeonHeight = 50;
-    [SerializeField]
-    [Range(0,10)]
-    private int offset = 1;
-    [SerializeField]
-    private bool randomWalkRooms = false;
-    [SerializeField]
-    [Range (0.1f,1)]
-    private float randomWalkRoomPercent = 0.1f;
+    [Range (0.1f,1)] private float randomWalkRoomPercent = 0.1f;
+
+    private List<GameObject> spawnedObjects = new List<GameObject>();
+
+    private void Start()
+    {
+        ClearSpawnedObjects();
+        tilemapVisualizer.Clear();
+        RunProceduralGeneration();
+    }
 
     protected override void RunProceduralGeneration()
     {
@@ -33,26 +50,24 @@ public class RoomFirstDungeonGenerator : SimpleRandomWalkDungeonGenerator
             roomsList = ProceduralGenerationAlgorithms.BinarySpacePartitioning(new BoundsInt((Vector3Int)startPosition, 
                 new Vector3Int(dungeonWidth, dungeonHeight, 0)), minRoomWidth, minRoomHeight);
 
+        roomsList = SortRooms(roomsList);
+
         HashSet<Vector2Int> floor = new HashSet<Vector2Int>();
 
-        if (randomWalkRooms)
-        {
-            int splitIndex = Mathf.RoundToInt(roomsList.Count * randomWalkRoomPercent);
+        int splitIndex = Mathf.RoundToInt(roomsList.Count * randomWalkRoomPercent);
 
-            var randomWalkRoomList = roomsList.GetRange(0, splitIndex); 
-            HashSet<Vector2Int> randomWalkRoomFloor = CreateRandomWalkRooms(randomWalkRoomList);
+        BoundsInt startRoom = roomsList[0];
+        var randomWalkRoomList = roomsList.GetRange(1, splitIndex); 
+        var treasureRooms = roomsList.GetRange(splitIndex, roomsList.Count - splitIndex);
+        var combatRooms = roomsList
+        .Where(r => r != startRoom && !treasureRooms.Contains(r))
+        .ToList();
 
-            // var simpleRoomList = roomsList.GetRange(splitIndex, roomsList.Count - splitIndex); 
-            // HashSet<Vector2Int> simpleRoomFloor = CreateSimpleRooms(simpleRoomList);
-            HashSet<Vector2Int> simpleRoomFloor = CreateSimpleRooms(roomsList);
+        HashSet<Vector2Int> randomWalkRoomFloor = CreateRandomWalkRooms(roomsList);
+        HashSet<Vector2Int> simpleRoomFloor = CreateSimpleRooms(roomsList);
 
-            floor.UnionWith(randomWalkRoomFloor);
-            floor.UnionWith(simpleRoomFloor);
-        }
-        else
-        {
-            floor = CreateSimpleRooms(roomsList);
-        }
+        floor.UnionWith(randomWalkRoomFloor);
+        floor.UnionWith(simpleRoomFloor);
 
         List<Vector2Int> roomCenters = new List<Vector2Int>();
         foreach (var room in roomsList)
@@ -65,6 +80,36 @@ public class RoomFirstDungeonGenerator : SimpleRandomWalkDungeonGenerator
 
         tilemapVisualizer.PaintFloorTiles(floor);
         WallGenerator.CreateWalls(floor, tilemapVisualizer);
+
+        PlaceRoomContents(
+            roomsList,
+            startRoom,
+            treasureRooms,
+            combatRooms,
+            floor,       // all floor positions
+            corridors    // the HashSet<Vector2Int> of your corridors
+        );
+    }
+
+    private List<BoundsInt> SortRooms(List<BoundsInt> roomsList)
+    {
+        List<BoundsInt> sorted = new List<BoundsInt>(roomsList);
+
+        for (int i = 1; i < sorted.Count; i++)
+        {
+            BoundsInt key = sorted[i];
+            float keySize = key.size.sqrMagnitude;
+
+            int j = i - 1;
+            while (j >= 0 && sorted[j].size.sqrMagnitude > keySize)
+            {
+                sorted[j + 1] = sorted[j];
+                j--;
+            }
+       
+            sorted[j + 1] = key;
+        }
+        return sorted;
     }
 
     private HashSet<Vector2Int> CreateRandomWalkRooms(List<BoundsInt> roomsList)
@@ -78,7 +123,7 @@ public class RoomFirstDungeonGenerator : SimpleRandomWalkDungeonGenerator
             foreach (var position in roomFloor)
             {
                 if (position.x >= (roomBounds.xMin + offset) && position.x <= (roomBounds.xMax - offset) && position.y >=
-                    (roomBounds.yMin - offset) && position.y <= (roomBounds.yMax - offset))
+                    (roomBounds.yMin + offset) && position.y <= (roomBounds.yMax - offset))
                 {
                     floor.Add(position);
                 }
@@ -168,5 +213,129 @@ public class RoomFirstDungeonGenerator : SimpleRandomWalkDungeonGenerator
             }
         }
         return floor;
+    }
+
+    private void PlaceRoomContents(
+        List<BoundsInt> allRooms,
+        BoundsInt startRoom,
+        List<BoundsInt> treasureRooms,
+        List<BoundsInt> combatRooms,
+        HashSet<Vector2Int> floor,
+        HashSet<Vector2Int> corridors
+    )
+    {
+        // helper: get the floor?inside?this?room (excluding corridors)
+        List<Vector2Int> GetRoomTiles(BoundsInt room)
+        {
+            var list = new List<Vector2Int>();
+            for (int x = room.xMin + offset; x < room.xMax - offset; x++)
+            {
+                for (int y = room.yMin + offset; y < room.yMax - offset; y++)
+                {
+                    var p = new Vector2Int(x, y);
+                    if (floor.Contains(p) && !corridors.Contains(p))
+                        list.Add(p);
+                }
+            }
+            return list;
+        }
+
+        Vector3 startPos = tilemapVisualizer.CellToWorld((Vector3Int)Vector2Int.RoundToInt(startRoom.center))
+                                 + new Vector3(0.5f, 0.5f, 0);
+        Instantiate(playerPrefab, startPos, Quaternion.identity);
+
+        // 1) Place chest(s) in each treasure room (at room.center)
+        foreach (var room in treasureRooms)
+        {
+            Vector3 worldPos = tilemapVisualizer.CellToWorld((Vector3Int)Vector2Int.RoundToInt(room.center));
+            var go = Instantiate(chestPrefab, worldPos, Quaternion.identity);
+            Vector3 mage1 = worldPos + new Vector3(1, 0, 0);
+            Vector3 mage2 = worldPos + new Vector3(-1, 0, 0);
+            var go2 = Instantiate(magePrefab, mage1, Quaternion.identity);
+            var go3 = Instantiate(magePrefab, mage2, Quaternion.identity);
+            spawnedObjects.Add(go);
+            spawnedObjects.Add(go2);
+            spawnedObjects.Add(go3);
+        }
+
+        // 2) Place enemies in your combat rooms
+        foreach (var room in combatRooms)
+        {
+            var tiles = GetRoomTiles(room);
+            int count = Mathf.RoundToInt(tiles.Count * enemyDensity);
+            Shuffle(tiles);
+            for (int i = 0; i < count; i++)
+            {
+                var p = tiles[i];
+                Vector3 worldPos = tilemapVisualizer.CellToWorld((Vector3Int)p) + Vector3.one * 0.5f;
+                var go = Instantiate(enemyPrefab, worldPos, Quaternion.identity);
+                spawnedObjects.Add(go);
+            }
+        }
+
+        // 3) Place decorative props in every room
+        foreach (var room in allRooms)
+        {
+            var tiles = GetRoomTiles(room);
+            int count = Mathf.RoundToInt(tiles.Count * decorationDensity);
+            Shuffle(tiles);
+            for (int i = 0; i < count; i++)
+            {
+                var p = tiles[i];
+                Vector3 worldPos = tilemapVisualizer.CellToWorld((Vector3Int)p) + Vector3.one * 0.5f;
+                var deco = decorationPrefabs[Random.Range(0, decorationPrefabs.Length)];
+                var go = Instantiate(deco, worldPos, Quaternion.identity);
+                spawnedObjects.Add(go);
+            }
+        }
+
+        // 4) Place torches only against walls in each room
+        foreach (var room in allRooms)
+        {
+            // gather (wallCell, floorCell, dir) tuples
+            var candidates = new List<(Vector2Int wallCell, Vector2Int floorCell, Vector2Int dir)>();
+            foreach (var p in GetRoomTiles(room))
+            {
+                foreach (var d in Direction2D.cardinalDirectionsList)
+                {
+                    var wallCell = p + d;
+                    if (!floor.Contains(wallCell))
+                        candidates.Add((wallCell, p, d));
+                }
+            }
+
+            if (candidates.Count == 0)
+                continue;
+
+            Shuffle(candidates);
+            int torchCount = Random.Range(minTorchesPerRoom, maxTorchesPerRoom + 1);
+
+            for (int i = 0; i < torchCount && i < candidates.Count; i++)
+            {
+                var (wallCell, floorCell, dir) = candidates[i];
+
+                // decide where to spawn
+                Vector2Int spawnCell = dir == Vector2Int.up ? wallCell : floorCell;
+                Vector3 worldPos = tilemapVisualizer.CellToWorld((Vector3Int)spawnCell);
+                var go = Instantiate(torchPrefab, worldPos, Quaternion.identity);
+                spawnedObjects.Add(go);
+            }
+        }
+    }
+
+    // Fisher–Yates shuffle helper
+    private void Shuffle<T>(List<T> list)
+    {
+        for (int i = 0; i < list.Count - 1; i++)
+        {
+            int j = Random.Range(i, list.Count);
+            (list[i], list[j]) = (list[j], list[i]);
+        }
+    }
+    private void ClearSpawnedObjects()
+    {
+        foreach (var go in spawnedObjects)
+            if (go != null) Destroy(go);
+        spawnedObjects.Clear();
     }
 }

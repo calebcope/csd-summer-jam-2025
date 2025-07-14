@@ -9,8 +9,10 @@ public class TilemapVisualizer : MonoBehaviour
     [SerializeField]
     private Tilemap floorTilemap, wallTilemap;
 
+    [SerializeField] private TileBase[] floorTiles;
+
     [SerializeField]
-    private TileBase floorTile, 
+    private TileBase 
         wallTop, wallTopCornerRight, wallTopCornerLeft, wallTopCornerFull,
         wallRight, wallLeft, wallBottom, wallFull, 
         wallInnerCornerDownLeft, wallInnerCornerDownRight, 
@@ -18,7 +20,11 @@ public class TilemapVisualizer : MonoBehaviour
 
     public void PaintFloorTiles(IEnumerable<Vector2Int> floorPositions)
     {
-        PaintTiles(floorPositions, floorTilemap, floorTile);
+        foreach (var position in floorPositions) 
+        {
+            TileBase tile = floorTiles[UnityEngine.Random.Range(0, floorTiles.Length)];
+            PaintSingleTile(floorTilemap, position, tile);
+        }
     }
 
     private void PaintTiles(IEnumerable<Vector2Int> positions, Tilemap tilemap, TileBase tile)
@@ -122,5 +128,10 @@ public class TilemapVisualizer : MonoBehaviour
 
         if (tile != null)
             PaintSingleTile(wallTilemap, position, tile);
+    }
+
+    public Vector3 CellToWorld(Vector3Int cellPosition)
+    {
+        return floorTilemap.GetCellCenterWorld(cellPosition);
     }
 }
